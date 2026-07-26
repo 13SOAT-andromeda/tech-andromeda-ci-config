@@ -1,0 +1,14 @@
+name: 'Setup Go (cached)'
+description: 'actions/setup-go lendo a versão direto do go.mod do repo consumidor, com cache de módulos'
+inputs:
+  go-version-file:
+    description: 'Caminho do go.mod, relativo à raiz do repo consumidor'
+    required: false
+    default: 'go.mod'
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ inputs.go-version-file }}
+        cache: true
