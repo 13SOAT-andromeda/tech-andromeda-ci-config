@@ -1,0 +1,73 @@
+name: Reusable — Lambda CD
+
+on:
+  workflow_call:
+    inputs:
+      ecr-repository:
+        type: string
+        required: true
+      platform:
+        type: string
+        required: false
+        default: 'linux/arm64'
+      terraform-dir:
+        type: string
+        required: true
+      terraform-run-tests:
+        type: boolean
+        required: false
+        default: false
+      extra-tf-vars:
+        type: string
+        required: false
+        default: ''
+      datadog-api-key-var-name:
+        type: string
+        required: false
+        default: ''
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: true
+      AWS_REGION:
+        required: true
+      AWS_S3_TF_STATE_BUCKET_NAME:
+        required: true
+
+jobs:
+  build-push:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: aws-prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: 13SOAT-andromeda/tech-andromeda-ci-config/actions/configure-aws-session@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
+        id: ecr
+      - name: Build & push (sem provenance/SBOM — Lambda rejeita manifest OCI com attestation)
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ inputs.ecr-repository }}
+        run: |
+          docker buildx build --platform ${{ inputs.platform }} --provenance=false --sbom=false \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }} -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            --push .
+
+  terraform-cd:
+    needs: build-push
+    if: always() && (github.event_name == 'pull_request' || needs.build-push.result == 'success')
+    uses: 13SOAT-andromeda/tech-andromeda-ci-config/.github/workflows/reusable-terraform-cd.yml@v1
+    with:
+      terraform-dir: ${{ inputs.terraform-dir }}
+      run-tests: ${{ inputs.terraform-run-tests }}
+      extra-tf-vars: -var="image_tag=${{ github.sha }}" ${{ inputs.extra-tf-vars }}
+      datadog-api-key-var-name: ${{ inputs.datadog-api-key-var-name }}
+    secrets: inherit
