@@ -38,6 +38,9 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     environment: aws-prod
+    permissions:
+      contents: read
+      pull-requests: write
     defaults:
       run:
         working-directory: ${{ inputs.terraform-dir }}

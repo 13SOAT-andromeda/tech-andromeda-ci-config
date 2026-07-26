@@ -39,6 +39,9 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     environment: aws-prod
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: 13SOAT-andromeda/tech-andromeda-ci-config/actions/configure-aws-session@v1
