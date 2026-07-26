@@ -1,0 +1,102 @@
+name: Reusable — Go CI
+
+on:
+  workflow_call:
+    inputs:
+      needs-ffmpeg:
+        description: 'Instala ffmpeg antes dos testes (repos que tocam mídia)'
+        type: boolean
+        required: false
+        default: false
+      go-version-file:
+        type: string
+        required: false
+        default: 'go.mod'
+      sonar-project-key:
+        type: string
+        required: true
+    secrets:
+      SONAR_TOKEN:
+        required: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: 13SOAT-andromeda/tech-andromeda-ci-config/actions/setup-go-cached@v1
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+      - name: Install ffmpeg
+        if: inputs.needs-ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: go mod download
+      - run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Unit tests + coverage
+        run: go test ./... -coverprofile=coverage.out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: 13SOAT-andromeda/tech-andromeda-ci-config/actions/setup-go-cached@v1
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+      - uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8
+        with: { version: latest }
+
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: 13SOAT-andromeda/tech-andromeda-ci-config/actions/setup-go-cached@v1
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+      - name: Check Build
+        run: go build ./...
+      - name: Install SAST tools
+        run: |
+          cd tools
+          go install github.com/securego/gosec/v2/cmd/gosec
+          go install golang.org/x/vuln/cmd/govulncheck
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      - name: Gosec
+        run: gosec -fmt=sarif -out=gosec-report.sarif ./... || true
+      - name: govulncheck
+        run: govulncheck -json ./... > vulncheck-report.json 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: security-sast-results
+          path: |
+            gosec-report.sarif
+            vulncheck-report.json
+
+  sonar:
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: 13SOAT-andromeda/tech-andromeda-ci-config/actions/setup-go-cached@v1
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+      - name: Install ffmpeg
+        if: inputs.needs-ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Tests with coverage
+        run: go test ./... -coverprofile=coverage.out
+      - name: SonarQube Cloud Scan
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=13soat-andromeda
+            -Dsonar.projectKey=${{ inputs.sonar-project-key }}
+            -Dsonar.go.coverage.reportPaths=coverage.out
