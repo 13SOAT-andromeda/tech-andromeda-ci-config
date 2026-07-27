@@ -24,6 +24,11 @@ on:
         type: string
         required: false
         default: 'video-processor-eks-prod'
+      sqs-queue-env:
+        description: 'Formato "deployment:ENV_VAR_NAME:sqs-queue-name" — resolve a URL da fila via AWS CLI e injeta no Deployment com kubectl set env (o kustomize/manifest não sabe a URL, que muda por conta/região). Vazio = não faz nada.'
+        type: string
+        required: false
+        default: ''
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -113,3 +118,12 @@ jobs:
           for d in ${{ inputs.deployments }}; do
             kubectl rollout status deployment/$d -n default --timeout=180s
           done
+      - name: Resolve SQS queue URL env var
+        if: inputs.sqs-queue-env != ''
+        env:
+          SQS_QUEUE_ENV: ${{ inputs.sqs-queue-env }}
+        run: |
+          IFS=':' read -r DEPLOY VAR QUEUE <<< "$SQS_QUEUE_ENV"
+          URL=$(aws sqs get-queue-url --queue-name "$QUEUE" --query QueueUrl --output text)
+          kubectl set env "deployment/$DEPLOY" -n default "$VAR=$URL"
+          kubectl rollout status "deployment/$DEPLOY" -n default --timeout=180s
